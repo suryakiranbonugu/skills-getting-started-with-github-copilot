@@ -1,26 +1,14 @@
 """
-High School Management System API
-
-A super simple FastAPI application that allows students to view and sign up
-for extracurricular activities at Mergington High School.
+Pytest configuration and shared fixtures for the test suite.
 """
 
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
-import os
-from pathlib import Path
+import pytest
+from fastapi.testclient import TestClient
+from src.app import app, activities
 
-app = FastAPI(title="Mergington High School API",
-              description="API for viewing and signing up for extracurricular activities")
 
-# Mount the static files directory
-current_dir = Path(__file__).parent
-app.mount("/static", StaticFiles(directory=os.path.join(Path(__file__).parent,
-          "static")), name="static")
-
-# In-memory activity database
-activities = {
+# Store the original activities state for reset between tests
+INITIAL_ACTIVITIES_STATE = {
     "Chess Club": {
         "description": "Learn strategies and compete in chess tournaments",
         "schedule": "Fridays, 3:30 PM - 5:00 PM",
@@ -78,45 +66,27 @@ activities = {
 }
 
 
-@app.get("/")
-def root():
-    return RedirectResponse(url="/static/index.html")
-
-
-@app.get("/activities")
-def get_activities():
-    return activities
-
-
-@app.post("/activities/{activity_name}/signup")
-def signup_for_activity(activity_name: str, email: str):
-    """Sign up a student for an activity"""
-    # Validate activity exists
-    if activity_name not in activities:
-        raise HTTPException(status_code=404, detail="Activity not found")
-
-    # Get the specific activity
-    activity = activities[activity_name]
-
-    # Validate student is not already signed up
-    if email in activity["participants"]:
-        raise HTTPException(status_code=400, detail="Student is already signed up for this activity")
+@pytest.fixture(autouse=True)
+def reset_activities_state():
+    """
+    Fixture that resets the activities dictionary to its initial state before each test.
+    This ensures test isolation and prevents tests from affecting each other.
     
-    # Add student
-    activity["participants"].append(email)
-    return {"message": f"Signed up {email} for {activity_name}"}
+    autouse=True means this fixture runs automatically before each test function.
+    """
+    # Reset the global activities dictionary
+    activities.clear()
+    activities.update({k: {kk: v.copy() if isinstance(v, list) else v 
+                           for kk, v in vv.items()} 
+                      for k, vv in INITIAL_ACTIVITIES_STATE.items()})
+    
+    yield
 
 
-@app.delete("/activities/{activity_name}/participants")
-def remove_participant(activity_name: str, email: str):
-    """Remove a student from an activity"""
-    if activity_name not in activities:
-        raise HTTPException(status_code=404, detail="Activity not found")
-
-    activity = activities[activity_name]
-
-    if email not in activity["participants"]:
-        raise HTTPException(status_code=404, detail="Student not found in activity")
-
-    activity["participants"].remove(email)
-    return {"message": f"Removed {email} from {activity_name}"}
+@pytest.fixture
+def client():
+    """
+    Fixture that provides a TestClient instance for the FastAPI app.
+    This client can be used to make requests to the application endpoints.
+    """
+    return TestClient(app)
